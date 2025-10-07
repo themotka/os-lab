@@ -1,0 +1,18 @@
+﻿Build started 07.10.2025 15:37:16.
+     1>Project "C:\Users\themotka\Documents\Eco\Лабораторная_Калентьев\Eco.Lab1\AssemblyFiles\Windows\VisualStudio_10\Eco.Lab1UnitTest.vcxproj" on node 2 (build target(s)).
+     1>InitializeBuildStatus:
+         Creating "Eco.Lab1UnitTest\DynamicDebug\Eco.Lab1UnitTest.unsuccessfulbuild" because "AlwaysCreate" was specified.
+       ClCompile:
+         All outputs are up-to-date.
+     1>C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\Microsoft.CppBuild.targets(990,5): warning MSB8012: TargetPath(C:\Users\themotka\Documents\Eco\Лабораторная_Калентьев\Eco.Lab1\AssemblyFiles\Windows\VisualStudio_10\Eco.Lab1UnitTest\DynamicDebug\Eco.Lab1UnitTest.exe) does not match the Linker's OutputFile property value (C:\Users\themotka\Documents\Eco\Лабораторная_Калентьев\Eco.Lab1\BuildFiles\Windows\x86\DynamicDebug\Eco.Lab1UnitTest.exe). This may cause your project to build incorrectly. To correct this, please make sure that $(OutDir), $(TargetName) and $(TargetExt) property values match the value specified in %(Link.OutputFile).
+       Link:
+         All outputs are up-to-date.
+         Eco.Lab1UnitTest.vcxproj -> C:\Users\themotka\Documents\Eco\Лабораторная_Калентьев\Eco.Lab1\AssemblyFiles\Windows\VisualStudio_10\Eco.Lab1UnitTest\DynamicDebug\Eco.Lab1UnitTest.exe
+       FinalizeBuildStatus:
+         Deleting file "Eco.Lab1UnitTest\DynamicDebug\Eco.Lab1UnitTest.unsuccessfulbuild".
+         Touching "Eco.Lab1UnitTest\DynamicDebug\Eco.Lab1UnitTest.lastbuildstate".
+     1>Done Building Project "C:\Users\themotka\Documents\Eco\Лабораторная_Калентьев\Eco.Lab1\AssemblyFiles\Windows\VisualStudio_10\Eco.Lab1UnitTest.vcxproj" (build target(s)).
+
+Build succeeded.
+
+Time Elapsed 00:00:00.01
