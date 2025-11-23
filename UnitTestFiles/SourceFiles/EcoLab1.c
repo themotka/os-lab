@@ -3,6 +3,8 @@
 #include "IdEcoInterfaceBus1.h"
 #include "IdEcoFileSystemManagement1.h"
 #include "IdEcoLab1.h"
+#include "IdEcoList1.h"
+#include "CEcoLab1Sink.h"
 #include <stdio.h>
 
 static void print_separator() {
@@ -40,33 +42,54 @@ int16_t EcoMain(IEcoUnknown* pIUnk) {
     IEcoInterfaceBus1* pIBus = 0;
     IEcoMemoryAllocator1* pIMem = 0;
     IEcoLab1* pIEcoLab1 = 0;
+    IEcoLab1Events* pIEcoLab1Events = 0;
+    CEcoLab1Sink* pSink = 0;
 
+    if (pIUnk == 0) {
+        return result;
+    }
 
     if (pISys == 0) {
         result = pIUnk->pVTbl->QueryInterface(pIUnk, &GID_IEcoSystem, (void **)&pISys);
-        if (result != 0 || pISys == 0) {
-            printf("ERROR: Failed to create system interface.\n");
+        if (result != 0 && pISys == 0) {
             goto Release;
         }
     }
 
     result = pISys->pVTbl->QueryInterface(pISys, &IID_IEcoInterfaceBus1, (void **)&pIBus);
     if (result != 0 || pIBus == 0) {
-        printf("ERROR: Failed to get interface bus.\n");
         goto Release;
     }
+
+#ifdef ECO_LIB
+    /* Регистрация статического компонента для работы со списком */
+    result = pIBus->pVTbl->RegisterComponent(pIBus, &CID_EcoList1, (IEcoUnknown*)GetIEcoComponentFactoryPtr_53884AFC93C448ECAA929C8D3A562281);
+    /* Продолжаем работу, возможно компонент уже зарегистрирован или доступен через DLL */
+#endif
 
     result = pIBus->pVTbl->QueryComponent(pIBus, &CID_EcoMemoryManager1, 0,
         &IID_IEcoMemoryAllocator1, (void**)&pIMem);
     if (result != 0 || pIMem == 0) {
-        printf("ERROR: Failed to get memory manager.\n");
         goto Release;
     }
 
     result = pIBus->pVTbl->QueryComponent(pIBus, &CID_EcoLab1, 0,
         &IID_IEcoLab1, (void**)&pIEcoLab1);
     if (result != 0 || pIEcoLab1 == 0) {
-        printf("ERROR: Failed to get IEcoLab1 interface.\n");
+        goto Release;
+    }
+
+    /* Создание sink для обработки событий */
+    result = createCEcoLab1Sink(pIMem, &pIEcoLab1Events);
+    if (result != 0 || pIEcoLab1Events == 0) {
+        goto Release;
+    }
+
+    pSink = (CEcoLab1Sink*)pIEcoLab1Events;
+
+    /* Подключение к событиям */
+    result = pSink->Advise(pSink, pIEcoLab1);
+    if (result != 0) {
         goto Release;
     }
 
@@ -152,13 +175,19 @@ int16_t EcoMain(IEcoUnknown* pIUnk) {
         printf("Gamma(12.0L) = %.0Lf | expected 39916800 -> %s\n", out, approx_equal_longdouble(out, expected, 1e-12L) ? "OK" : "FAIL");
     }
     result = 0;
-
 Release:
+    /* Отключение от событий */
+    if (pSink != 0 && pIEcoLab1 != 0) {
+        pSink->Unadvise(pSink, pIEcoLab1);
+    }
+    if (pIEcoLab1Events != 0) pIEcoLab1Events->pVTbl->Release(pIEcoLab1Events);
     if (pIBus != 0) pIBus->pVTbl->Release(pIBus);
     if (pIMem != 0) pIMem->pVTbl->Release(pIMem);
     if (pIEcoLab1 != 0) pIEcoLab1->pVTbl->Release(pIEcoLab1);
     if (pISys != 0) pISys->pVTbl->Release(pISys);
 
+    printf("\nPress Enter to exit...\n");
+    getchar();
     
     return result;
 }
