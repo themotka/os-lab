@@ -1,178 +1,381 @@
-### 1. ЗАДАЧА ПРОЕКТА
+# Реализация алгоритма «Next Fit» (следующего подходящего) выделения участков памяти по запросу
 
-Задача проекта — реализация вычисления гамма‑функции Γ(x) для различных числовых типов в рамках компонентной архитектуры.
+## 1. Описание алгоритма
 
-Цели проекта:
-- Реализация алгоритмов вычисления Γ(x) без использования стандартной библиотеки C (libc) и сторонних библиотек.
-- Поддержка типов: float, double, long double.
-- Интеграция вычислений в компонентную систему EcoSystem через интерфейс `IEcoLab1`.
-- Комплексное тестирование на характерных значениях (целые, полуцелые, большие целые).
+### Общая концепция
 
-### 2. ОПИСАНИЕ ГАММА-ФУНКЦИИ И ЕЕ РЕАЛИЗАЦИЯ
+**Next Fit**  — это алгоритм выделения памяти, который является модификацией алгоритма First Fit. Основное отличие заключается в том, что поиск свободного блока начинается не с начала кучи, а с места последнего успешного выделения памяти.
 
-Гамма‑функция Γ(x) обобщает факториал: для целых n>0, Γ(n)= (n−1)!. Для полуцелых значений: Γ(1/2)=√π, Γ(3/2)= 1/2·√π, и т.д.
+### Принцип работы
 
-В проекте применены:
-- Нормализация аргумента для устойчивости: поднятие x до диапазона [1, ∞) по тождеству Γ(v) = Γ(v+1)/v.
-- Аппроксимация Ланцоша (g=7, 9 коэф.) для точного вычисления Γ(x) на [1, ∞).
-- Собственные реализации элементарных функций без libc: exp, ln, pow, sqrt (ряды и итерации Ньютона), в варианте, совместимом с C89.
+1. **Инициализация**: При первом выделении памяти поиск начинается с начала кучи.
+2. **Последующее выделение**: Каждое следующее выделение начинается с места последнего успешного выделения.
+3. **Циклический поиск**: Если с текущей позиции не найдено подходящего места, поиск продолжается по кругу до возврата к начальной позиции.
+4. **Освобождение**: При освобождении блока он помечается как свободный, но указатель последнего выделения не изменяется.
 
-Принцип работы алгоритма:
-1. Если x < 1, поднимаем x до v ≥ 1, накапливая произведение acc *= v и увеличивая v на 1; далее Γ(x) = Γ(v) / acc.
-2. Вычисляем Γ(v) по аппроксимации Ланцоша:
-   - z = v − 1
-   - t = z + g + 1/2
-   - Γ(v) ≈ √(2π) · t^(z+1/2) · e^(−t) · Σ c_i/(z+i), i=0..N
-3. Итого Γ(x) = Γ(v) / acc.
+---
 
-Реализация в проекте:
+## 2. Реализация алгоритма
 
-```startLine:endLine:SourceFiles/CEcoLab1.c
-static long double CEcoLab1_gamma_lanczos_ld(long double x) {
-    static const long double COEF[9] = {
-        0.99999999999980993L, 676.5203681218851L, -1259.1392167224028L,
-        771.32342877765313L, -176.61502916214059L, 12.507343278686905L,
-        -0.13857109526572012L, 0.0000099843695780195716L,
-        0.00000015056327351493116L
-    };
-    static const long double G = 7.0L;
-    static const long double SQRT_TWO_PI = 2.5066282746310005024157652848110L;
-    long double z;
-    long double sum;
-    long double t;
-    int i;
-    z = x - 1.0L;
-    sum = COEF[0];
-    for (i = 1; i < 9; ++i) {
-        sum += COEF[i] / (z + (long double)i);
+### Архитектура решения
+
+Алгоритм реализован с использованием следующих компонентов:
+
+1. **Структура MemChunk** — описывает блок памяти
+2. **Связанный список блоков** — для отслеживания выделенных блоков
+3. **Пул чанков** — предвыделенный массив структур для метаданных
+4. **Указатель последнего выделения** — для реализации Next Fit
+
+---
+
+## 3. Структуры данных
+
+### MemChunk
+
+```c
+typedef struct MemChunk {
+    char_t* pBegin;      /* Начало блока памяти */
+    char_t* pEnd;        /* Конец блока памяти */
+    bool_t bInUse;       /* Флаг использования (1 = занят, 0 = свободен) */
+    struct MemChunk* pNext;  /* Указатель на следующий блок в списке */
+    struct MemChunk* pPrev;  /* Указатель на предыдущий блок в списке */
+} MemChunk;
+```
+
+### Структура менеджера памяти
+
+```c
+typedef struct CEcoMemoryManager1Lab_623E1838 {
+    /* другие поля */
+    
+    /* Данные для Next Fit */
+    char_t* m_pMemBase;           /* Начало доступной памяти */
+    char_t* m_pMemLimit;          /* Конец доступной памяти */
+    MemChunk* m_pChunkList;       /* Голова связанного списка блоков */
+    MemChunk* m_pLastFit;         /* Указатель на последний выделенный блок */
+    MemChunk* m_pChunkPool;       /* Пул предвыделенных структур MemChunk */
+    uint32_t m_uChunkPoolSize;    /* Размер пула чанков */
+} CEcoMemoryManager1Lab_623E1838;
+```
+
+---
+
+## 4. Примеры кода
+
+### Инициализация менеджера памяти
+
+```c
+static int16_t ECOCALLMETHOD CEcoMemoryManager1Lab_623E1838_Init(
+    /* in */ IEcoMemoryManager1Ptr_t me, 
+    /* in */ voidptr_t startAddress, 
+    /* in */ uint32_t size) {
+    
+    CEcoMemoryManager1Lab_623E1838* pCMe = (CEcoMemoryManager1Lab_623E1838*)me;
+    uint32_t uChunkPoolSize;
+    uint32_t uChunkPoolMemSize;
+    MemChunk* pChunk;
+    uint32_t i;
+
+    /* Инициализация данных для Next Fit */
+    uChunkPoolSize = 1000;
+    uChunkPoolMemSize = uChunkPoolSize * sizeof(MemChunk);
+    
+    /* Пул чанков размещается в начале выделенной области */
+    pCMe->m_pChunkPool = (MemChunk*)startAddress;
+    
+    /* Память для данных начинается после пула чанков */
+    pCMe->m_pMemBase = (char_t*)startAddress + uChunkPoolMemSize;
+    pCMe->m_pMemLimit = (char_t*)startAddress + size;
+    pCMe->m_uChunkPoolSize = uChunkPoolSize;
+    pCMe->m_pChunkList = 0;
+    pCMe->m_pLastFit = 0;
+    
+    /* Инициализация пула чанков */
+    pChunk = pCMe->m_pChunkPool;
+    for (i = 0; i < uChunkPoolSize; i++) {
+        pChunk->bInUse = 0;
+        pChunk->pBegin = 0;
+        pChunk->pEnd = 0;
+        pChunk->pNext = 0;
+        pChunk->pPrev = 0;
+        pChunk++;
     }
-    t = z + G + 0.5L;
-    return SQRT_TWO_PI * CEcoLab1_pow_ld(t, z + 0.5L) * CEcoLab1_exp_ld(-t) * sum;
+
+    return 0;
 }
 ```
 
-```startLine:endLine:SourceFiles/CEcoLab1.c
-static long double CEcoLab1_gamma_ld(long double x) {
-    long double acc;
-    long double v;
-    if (x <= 0.0L) {
-        return 0.0L;
+### Основная функция выделения памяти (Next Fit)
+
+```c
+static void* nextFitAllocate(
+    uint32_t uSize, 
+    MemChunk** ppLastFit,      /* Указатель на последний выделенный блок */
+    MemChunk** ppListHead,     /* Голова списка блоков */
+    MemChunk* pPool,           /* Пул свободных чанков */
+    uint32_t uPoolSize,        /* Размер пула */
+    char_t* pBase,             /* Начало доступной памяти */
+    char_t* pLimit) {          /* Конец доступной памяти */
+    
+    MemChunk* pCurrent;
+    MemChunk* pNewChunk;
+    MemChunk* pListHead;
+    char_t bWrapped;
+    uint32_t uGap;
+    
+    pListHead = *ppListHead;
+    bWrapped = 0;
+    
+    /* Если список пуст - первое выделение */
+    if (pListHead == 0) {
+        if ((uint32_t)(pLimit - pBase) >= uSize) {
+            pNewChunk = findFreeChunk(pPool, uPoolSize);
+            if (pNewChunk == 0) {
+                return 0;
+            }
+            initChunk(pNewChunk, pBase, uSize, 0, 0);
+            *ppListHead = pNewChunk;
+            *ppLastFit = pNewChunk;
+            return pNewChunk->pBegin;
+        }
+        return 0;
     }
-    acc = 1.0L;
-    v = x;
-    while (v < 1.0L) {
-        acc *= v;
-        v += 1.0L;
+    
+    /* Инициализация текущей позиции для поиска */
+    if (*ppLastFit != 0) {
+        pCurrent = *ppLastFit;  /* Начинаем с последнего выделенного */
+    } else {
+        pCurrent = pListHead;   /* Если нет последнего - с начала */
     }
-    return CEcoLab1_gamma_lanczos_ld(v) / acc;
+    
+    /* Циклический поиск подходящего места */
+    while (bWrapped == 0 || pCurrent != *ppLastFit) {
+        /* Проверка промежутка между текущим и следующим блоком */
+        if (pCurrent->pNext != 0) {
+            uGap = (uint32_t)(pCurrent->pNext->pBegin - pCurrent->pEnd);
+            if (uGap >= uSize) {
+                /* Нашли подходящее место - выделяем блок */
+                pNewChunk = findFreeChunk(pPool, uPoolSize);
+                if (pNewChunk == 0) {
+                    return 0;
+                }
+                initChunk(pNewChunk, pCurrent->pEnd, uSize, pCurrent, pCurrent->pNext);
+                pCurrent->pNext->pPrev = pNewChunk;
+                pCurrent->pNext = pNewChunk;
+                *ppLastFit = pNewChunk;  /* Обновляем указатель последнего выделения */
+                return pNewChunk->pBegin;
+            }
+            pCurrent = pCurrent->pNext;
+            continue;
+        }
+        
+        /* Проверка места после последнего блока */
+        uGap = (uint32_t)(pLimit - pCurrent->pEnd);
+        if (uGap >= uSize) {
+            pNewChunk = findFreeChunk(pPool, uPoolSize);
+            if (pNewChunk == 0) {
+                return 0;
+            }
+            initChunk(pNewChunk, pCurrent->pEnd, uSize, pCurrent, 0);
+            pCurrent->pNext = pNewChunk;
+            *ppLastFit = pNewChunk;
+            return pNewChunk->pBegin;
+        }
+        
+        /* Переход к началу списка для циклического поиска */
+        bWrapped = 1;
+        pCurrent = pListHead;
+        
+        /* Проверка места перед первым блоком */
+        uGap = (uint32_t)(pCurrent->pBegin - pBase);
+        if (uGap >= uSize) {
+            pNewChunk = findFreeChunk(pPool, uPoolSize);
+            if (pNewChunk == 0) {
+                return 0;
+            }
+            initChunk(pNewChunk, pBase, uSize, 0, pCurrent);
+            pCurrent->pPrev = pNewChunk;
+            *ppListHead = pNewChunk;
+            *ppLastFit = pNewChunk;
+            return pNewChunk->pBegin;
+        }
+    }
+    
+    return 0;  /* Не найдено подходящего места */
 }
 ```
 
-Публичный интерфейс для типов:
+### Функция освобождения памяти
 
-```startLine:endLine:SharedFiles/IEcoLab1.h
-/* Вычисление гамма-функции для разных типов */
-int16_t (ECOCALLMETHOD *gamma_float)(IEcoLab1Ptr_t me, float x, float* result);
-int16_t (ECOCALLMETHOD *gamma_double)(IEcoLab1Ptr_t me, double x, double* result);
-int16_t (ECOCALLMETHOD *gamma_longdouble)(IEcoLab1Ptr_t me, long double x, long double* result);
-```
-
-```startLine:endLine:SourceFiles/CEcoLab1.c
-static int16_t ECOCALLMETHOD CEcoLab1_gamma_double(IEcoLab1Ptr_t me, double x, double* out) {
-    if (me == 0 || out == 0) {
-        return ERR_ECO_POINTER;
+```c
+static void nextFitFree(char_t* pPtr, MemChunk** ppListHead) {
+    MemChunk* pChunk;
+    
+    if (ppListHead == 0 || *ppListHead == 0) {
+        return;
     }
-    if (x <= 0.0) {
-        return -2;
+    
+    pChunk = *ppListHead;
+    
+    /* Если освобождается первый блок */
+    if (pChunk->pBegin == pPtr) {
+        pChunk->bInUse = 0;
+        if (pChunk->pNext != 0) {
+            pChunk->pNext->pPrev = 0;
+            *ppListHead = pChunk->pNext;
+        } else {
+            *ppListHead = 0;
+        }
+        return;
     }
-    *out = (double)CEcoLab1_gamma_ld((long double)x);
-    return ERR_ECO_SUCCESES;
+    
+    /* Поиск блока для освобождения */
+    while (pChunk != 0) {
+        if (pChunk->pBegin == pPtr) {
+            pChunk->bInUse = 0;
+            /* Обновление связей в списке */
+            if (pChunk->pNext != 0) {
+                pChunk->pNext->pPrev = pChunk->pPrev;
+            }
+            if (pChunk->pPrev != 0) {
+                pChunk->pPrev->pNext = pChunk->pNext;
+            }
+            break;
+        }
+        pChunk = pChunk->pNext;
+    }
 }
 ```
 
-### 3. АСИМПТОТИКА ВЫЧИСЛЕНИЯ
+### Вспомогательные функции
 
-- Ланцош (фиксированное число коэффициентов): O(1) по времени, O(1) по памяти на один вызов, т.к. выполняется постоянное количество операций.
-- Нормализация (поднятие до v≥1): O(k), где k — число шагов подъёма (для практических x обычно 0 или 1).
-- Элементарные функции exp/ln/pow/sqrt реализованы по рядам/Ньютону с ограниченным числом итераций: амортизированно O(1).
-
-Итог: один вызов Γ(x) имеет константную трудоёмкость при фиксированных параметрах аппроксимации.
-
-### 4. РЕАЛИЗАЦИЯ И ДЕТАЛИ КОДА
-
-Интерфейс компонента:
-
-```startLine:endLine:SharedFiles/IEcoLab1.h
-typedef struct IEcoLab1VTbl {
-    int16_t (ECOCALLMETHOD *QueryInterface)(IEcoLab1Ptr_t me, const UGUID* riid, voidptr_t* ppv);
-    uint32_t (ECOCALLMETHOD *AddRef)(IEcoLab1Ptr_t me);
-    uint32_t (ECOCALLMETHOD *Release)(IEcoLab1Ptr_t me);
-    int16_t (ECOCALLMETHOD *MyFunction)(IEcoLab1Ptr_t me, char_t* Name, char_t** CopyName);
-
-    /* Вычисление гамма-функции */
-    int16_t (ECOCALLMETHOD *gamma_float)(IEcoLab1Ptr_t me, float x, float* result);
-    int16_t (ECOCALLMETHOD *gamma_double)(IEcoLab1Ptr_t me, double x, double* result);
-    int16_t (ECOCALLMETHOD *gamma_longdouble)(IEcoLab1Ptr_t me, long double x, long double* result);
-} IEcoLab1VTbl, *IEcoLab1VTblPtr;
-```
-
-Таблица виртуальных функций:
-
-```startLine:endLine:SourceFiles/CEcoLab1.c
-IEcoLab1VTbl g_x277FC00C35624096AFCFC125B94EEC90VTbl = {
-    CEcoLab1_QueryInterface,
-    CEcoLab1_AddRef,
-    CEcoLab1_Release,
-    CEcoLab1_MyFunction,
-    CEcoLab1_gamma_float,
-    CEcoLab1_gamma_double,
-    CEcoLab1_gamma_longdouble
-};
-```
-
-Фрагмент публичного API для float:
-
-```startLine:endLine:SourceFiles/CEcoLab1.c
-static int16_t ECOCALLMETHOD CEcoLab1_gamma_float(IEcoLab1Ptr_t me, float x, float* out) {
-    if (me == 0 || out == 0) {
-        return ERR_ECO_POINTER;
+```c
+/* Поиск свободного чанка в пуле */
+static MemChunk* findFreeChunk(MemChunk* pPool, uint32_t uSize) {
+    MemChunk* pChunk;
+    uint32_t i;
+    
+    if (pPool == 0) {
+        return 0;
     }
-    if (x <= 0.0f) {
-        return -2;
+    
+    pChunk = pPool;
+    for (i = 0; i < uSize; i++) {
+        if (pChunk->bInUse == 0) {
+            return pChunk;
+        }
+        pChunk++;
     }
-    *out = (float)CEcoLab1_gamma_ld((long double)x);
-    return ERR_ECO_SUCCESES;
+    return 0;
+}
+
+/* Инициализация чанка памяти */
+static void initChunk(
+    MemChunk* pChunk, 
+    char_t* pStart, 
+    uint32_t uSize, 
+    MemChunk* pPrev, 
+    MemChunk* pNext) {
+    
+    if (pChunk == 0) {
+        return;
+    }
+    pChunk->bInUse = 1;
+    pChunk->pBegin = pStart;
+    pChunk->pEnd = pStart + uSize;
+    pChunk->pPrev = pPrev;
+    pChunk->pNext = pNext;
 }
 ```
 
-Система тестирования (пример сравнения с допуском, double):
+---
 
-```startLine:endLine:UnitTestFiles/SourceFiles/EcoLab1.c
-static int approx_equal_double(double a, double b, double eps) {
-    double d = a - b;
-    if (d < 0.0) d = -d;
-    return d <= eps * (b >= 0.0 ? (b + 1.0) : (-b + 1.0));
-}
+## 5. Описание unit-тестов
 
-/* Пример тестирования */
-{
-    double out = 0.0;
-    double expected = 362880.0; /* 9! */
-    pIEcoLab1->pVTbl->gamma_double(pIEcoLab1, 10.0, &out);
-    printf("Gamma(10.0) = %.2f | expected 362880.0 -> %s\n",
-        out, approx_equal_double(out, expected, 1e-12) ? "OK" : "FAIL");
-}
-```
+### Test1: Basic Alloc (Базовое выделение памяти)
 
-Проверка характерных значений в тестах:
-- Целые: Γ(1)=1, Γ(2)=1, Γ(3)=2, Γ(6)=120, Γ(12)=39916800, Γ(10)=362880.
-- Полуцелые: Γ(0.5)=√π≈1.77245…, Γ(1.5)=0.5√π≈0.8862269…
-- Типы: float/double/long double.
+**Назначение**: Проверяет корректность базового выделения памяти.
 
-Дополнительно:
-- Реализации `CEcoLab1_exp_ld`, `CEcoLab1_ln_ld`, `CEcoLab1_pow_ld`, `CEcoLab1_sqrt_ld` написаны без libc.
-- Для отрицательных/некорректных аргументов возвращается код ошибки, а значение не вычисляется.
+**Алгоритм теста**:
+1. Выделяет первый блок размером 100 байт
+2. Выделяет второй блок размером 200 байт
+3. Проверяет, что оба указателя не равны NULL
+4. Проверяет, что указатели не равны друг другу
+5. Освобождает оба блока
 
-### 3. ВЫВОД
-<img width="780" height="504" alt="image" src="https://github.com/user-attachments/assets/4724e385-2e1b-4965-a294-96bbfd1906c0" />
+---
+
+### Test2: Free & Reuse (Освобождение и повторное использование)
+
+**Назначение**: Проверяет, что освобожденная память может быть повторно использована.
+
+**Алгоритм теста**:
+1. Выделяет два блока (ptr1, ptr2)
+2. Освобождает первый блок (ptr1)
+3. Выделяет новый блок (ptr3) того же размера
+4. Проверяет, что ptr3 == ptr1 (повторное использование)
+5. Освобождает все блоки
+
+---
+
+### Test3: Next Fit (Поведение алгоритма Next Fit)
+
+**Назначение**: Проверяет специфическое поведение алгоритма Next Fit — поиск начинается с последнего выделенного блока.
+
+**Алгоритм теста**:
+1. Выделяет три блока подряд (ptr1, ptr2, ptr3)
+2. Освобождает средний блок (ptr2)
+3. Выделяет новый блок (ptr4)
+4. Проверяет, что ptr4 либо равен ptr2 (использовано освобожденное место), либо находится после ptr3 (Next Fit продолжает с последнего)
+
+---
+
+### Test4: Multiple (Множественные выделения и освобождения)
+
+**Назначение**: Проверяет работу алгоритма при множественных операциях выделения и освобождения.
+
+**Алгоритм теста**:
+1. Выделяет 10 блоков по 50 байт каждый
+2. Освобождает каждый второй блок (индексы 0, 2, 4, 6, 8)
+3. Выделяет новые блоки в освобожденные места
+4. Проверяет, что все выделения успешны
+5. Освобождает все блоки
+
+---
+
+### Test5: Status (Проверка статуса памяти)
+
+**Назначение**: Проверяет корректность функции получения статуса памяти.
+
+**Алгоритм теста**:
+1. Получает начальный статус памяти
+2. Выделяет блок памяти (1000 байт)
+3. Получает статус после выделения
+4. Проверяет, что количество использованных блоков увеличилось
+5. Проверяет, что свободная память уменьшилась
+6. Освобождает блок
+
+---
+
+### Test6: Oversized (Граничный случай - слишком большой блок)
+
+**Назначение**: Проверяет обработку запроса на выделение блока, превышающего доступную память.
+
+**Алгоритм теста**:
+1. Пытается выделить очень большой блок (1 МБ = 0x100000 байт)
+2. Проверяет, что возвращается NULL (так как доступно только 512 КБ)
+3. Если блок был выделен (не должно быть), освобождает его
+
+---
+
+## 6. Заключение
+
+Реализованный алгоритм Next Fit обеспечивает:
+
+1. **Эффективное использование памяти** - начинается поиск с последнего выделения
+2. **Корректную работу с освобожденными блоками** - они могут быть повторно использованы
+3. **Циклический поиск** - если с текущей позиции не найдено места, поиск продолжается по кругу
+4. **Надежность** - все граничные случаи обрабатываются корректно
+
+Unit-тесты покрывают все основные сценарии использования и позволяют убедиться в корректности работы алгоритма.
 
